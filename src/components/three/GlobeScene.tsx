@@ -1,6 +1,6 @@
 "use client";
 
-import { Html, Stars, Trail } from "@react-three/drei";
+import { Stars, Trail } from "@react-three/drei";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
@@ -229,18 +229,6 @@ function Marker({
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
-      {active && (
-        <Html position={[0, h + 0.04, 0]} center zIndexRange={[40, 0]} style={{ pointerEvents: "none" }}>
-          <div className="glass-strong min-w-max -translate-y-6 rounded-2xl px-3.5 py-2 text-left shadow-2xl">
-            <div className="flex items-center gap-2 text-sm font-semibold text-white">
-              <span className={`h-2 w-2 rounded-full ${m.region === "domestic" ? "bg-sun-400" : "bg-aqua-400"}`} />
-              {m.name}
-            </div>
-            {m.tagline ? <div className="mt-0.5 text-[11px] text-white/60">{m.tagline}</div> : null}
-            {onSelect && !isHub ? <div className="mt-1 text-[10px] font-semibold tracking-wider text-sun-300 uppercase">Click to explore →</div> : null}
-          </div>
-        </Html>
-      )}
     </group>
   );
 }
@@ -312,7 +300,11 @@ function CameraFit({ baseZ }: { baseZ: number }) {
   return null;
 }
 
-function World({ markers, hub, focus, onSelect, showPlane = true, showArcs = true }: GlobeProps) {
+type LabelBridge = { el: React.RefObject<HTMLDivElement | null>; onActive: (m: GlobeMarker | null) => void };
+
+const MARKER_TIP = 0.055 + 0.03;
+
+function World({ markers, hub, focus, onSelect, showPlane = true, showArcs = true, label }: GlobeProps & { label: LabelBridge }) {
   const outer = useRef<THREE.Group>(null);
   const inner = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -375,6 +367,14 @@ function World({ markers, hub, focus, onSelect, showPlane = true, showArcs = tru
   }, [hovered]);
 
   const focused = markers.find((m) => m.slug === focus) ?? null;
+  const active = markers.find((m) => m.slug === hovered) ?? focused;
+  const { camera } = useThree();
+  const tmp = useMemo(() => ({ p: new THREE.Vector3(), n: new THREE.Vector3(), c: new THREE.Vector3() }), []);
+  const onActive = label.onActive;
+
+  useEffect(() => {
+    onActive(active);
+  }, [active, onActive]);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -404,6 +404,25 @@ function World({ markers, hub, focus, onSelect, showPlane = true, showArcs = tru
     }
     if (outer.current) outer.current.rotation.x = s.tilt;
     if (inner.current) inner.current.rotation.y = s.spin;
+
+    // Keep the DOM label pinned above the active marker.
+    const el = label.el.current;
+    if (el && inner.current) {
+      if (!active) {
+        el.style.opacity = "0";
+      } else {
+        inner.current.updateMatrixWorld();
+        latLngToVector3(active.lat, active.lng, R + MARKER_TIP, tmp.p).applyMatrix4(inner.current.matrixWorld);
+        tmp.n.copy(tmp.p).normalize();
+        tmp.c.copy(camera.position).sub(tmp.p).normalize();
+        const facing = tmp.n.dot(tmp.c);
+        tmp.p.project(camera);
+        const x = ((tmp.p.x + 1) / 2) * size.width;
+        const y = ((1 - tmp.p.y) / 2) * size.height;
+        el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+        el.style.opacity = facing > 0.15 ? "1" : "0";
+      }
+    }
   });
 
   const hubVec = useMemo(() => latLngToVector3(hub.lat, hub.lng, R), [hub.lat, hub.lng]);
@@ -464,7 +483,10 @@ function World({ markers, hub, focus, onSelect, showPlane = true, showArcs = tru
 
 export default function GlobeScene(props: GlobeProps & { className?: string }) {
   const wrap = useRef<HTMLDivElement>(null);
+  const labelEl = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(true);
+  const [activeMarker, setActiveMarker] = useState<GlobeMarker | null>(null);
+  const label = useMemo<LabelBridge>(() => ({ el: labelEl, onActive: setActiveMarker }), []);
 
   useEffect(() => {
     const el = wrap.current;
@@ -475,7 +497,7 @@ export default function GlobeScene(props: GlobeProps & { className?: string }) {
   }, []);
 
   return (
-    <div ref={wrap} className={props.className}>
+    <div ref={wrap} className={`relative ${props.className ?? ""}`}>
       <Canvas
         frameloop={visible ? "always" : "never"}
         dpr={[1, 1.75]}
@@ -488,8 +510,20 @@ export default function GlobeScene(props: GlobeProps & { className?: string }) {
         <directionalLight position={[-3, 3, 3]} intensity={1.4} />
         {props.showStars !== false && <Stars radius={60} depth={40} count={1800} factor={3} saturation={0} fade speed={0.6} />}
         <CameraFit baseZ={props.cameraZ ?? 3.35} />
-        <World {...props} />
+        <World {...props} label={label} />
       </Canvas>
+      <div ref={labelEl} className="pointer-events-none absolute top-0 left-0 z-10 transition-opacity duration-200" style={{ opacity: 0 }} aria-hidden>
+        {activeMarker && (
+          <div className="glass-strong min-w-max -translate-x-1/2 -translate-y-[calc(100%+6px)] rounded-2xl px-3.5 py-2 text-left shadow-2xl">
+            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+              <span className={`h-2 w-2 rounded-full ${activeMarker.region === "domestic" ? "bg-sun-400" : "bg-aqua-400"}`} />
+              {activeMarker.name}
+            </div>
+            {activeMarker.tagline ? <div className="mt-0.5 text-[11px] text-white/60">{activeMarker.tagline}</div> : null}
+            {props.onSelect ? <div className="mt-1 text-[10px] font-semibold tracking-wider text-sun-300 uppercase">Click to explore →</div> : null}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

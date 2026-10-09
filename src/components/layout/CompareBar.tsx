@@ -43,14 +43,14 @@ export function CompareBar() {
             {Array.from({ length: MAX_COMPARE }).map((_, i) => {
               const it = items[i];
               return it ? (
-                <div key={it.id} className="group relative h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-aqua-400/50" title={it.title}>
+                <div key={`pkg-${it.id}`} className="group relative h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-aqua-400/50" title={it.title}>
                   <SmartImage src={it.coverImage} alt={it.title} label="" width={100} className="h-full w-full" />
                   <button onClick={() => toggleCompare(it.id)} className="absolute inset-0 flex items-center justify-center bg-ink-950/70 opacity-0 transition group-hover:opacity-100" aria-label={`Remove ${it.title}`}>
                     <X size={14} />
                   </button>
                 </div>
               ) : (
-                <div key={i} className="h-10 w-10 shrink-0 rounded-full border border-dashed border-white/20" />
+                <div key={`slot-${i}`} className="h-10 w-10 shrink-0 rounded-full border border-dashed border-white/20" />
               );
             })}
             <span className="ml-1 hidden truncate text-xs text-white/60 sm:inline">{compare.length}/{MAX_COMPARE} selected</span>
